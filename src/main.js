@@ -92,20 +92,26 @@ const ACCENT_PALETTE = [
   new THREE.Color(0x00e5ff), // електрик-ціан
   new THREE.Color(0xffb84d), // рідке золото
 ];
-const accentColor = ACCENT_PALETTE[Math.floor(Math.random() * ACCENT_PALETTE.length)];
+let accentColor = ACCENT_PALETTE[Math.floor(Math.random() * ACCENT_PALETTE.length)];
 function accentTint(intensity, mix = 0.6) {
   return new THREE.Color(1, 1, 1).lerp(accentColor, mix).multiplyScalar(intensity);
+}
+function pickNextAccent() {
+  const options = ACCENT_PALETTE.filter((c) => c !== accentColor);
+  return options[Math.floor(Math.random() * options.length)];
 }
 
 /* ============================================================
    ENVIRONMENT — procedural studio / laboratory HDRI
+   rebuildable so each effect switch can carry a fresh accent color
    ============================================================ */
 preSet(0.3, 'BUILDING ENVIRONMENT');
-const pmrem = new THREE.PMREMGenerator(renderer);
-// custom dark laboratory: near-black room + crisp engineered light strips,
-// so the chrome reads as dark mirror metal with sliding highlights
-const envScene = new THREE.Scene();
-{
+let currentEnvRT = null;
+function buildEnvironment() {
+  const pmrem = new THREE.PMREMGenerator(renderer);
+  // custom dark laboratory: near-black room + crisp engineered light strips,
+  // so the chrome reads as dark mirror metal with sliding highlights
+  const envScene = new THREE.Scene();
   const room = new THREE.Mesh(
     new THREE.BoxGeometry(24, 24, 24),
     new THREE.MeshBasicMaterial({ color: 0x232326, side: THREE.BackSide })
@@ -145,10 +151,14 @@ const envScene = new THREE.Scene();
   strip(1.4, 9, 10.5, 0, 2, 0, -Math.PI / 2, 2.0);
   // large soft key panel, angled front-left
   strip(8, 6, -6, 3, 9, -0.3, 0.5, 1.5);
+
+  const rt = pmrem.fromScene(envScene, 0.04);
+  scene.environment = rt.texture;
+  pmrem.dispose();
+  if (currentEnvRT) currentEnvRT.dispose();
+  currentEnvRT = rt;
 }
-const envRT = pmrem.fromScene(envScene, 0.04);
-scene.environment = envRT.texture;
-pmrem.dispose();
+buildEnvironment();
 
 /* key/rim lights for extra speculars — rim carries a touch of the accent */
 const keyLight = new THREE.DirectionalLight(0xffffff, 0.6);
@@ -507,6 +517,7 @@ const GLASS_DEFS = [
   { w: 1.5, h: 1.9, x: 1.8, y: -0.5, z: 0.5, rotY: -0.4, rotZ: 0.1, opacity: 0.78 },
   { w: 1.3, h: 1.7, x: 0.1, y: 1.1, z: 2.2, rotY: 0.15, rotZ: 0.04, opacity: 0.7 },
 ];
+const glassRimMats = [];
 GLASS_DEFS.forEach((g) => {
   const mat = new THREE.MeshPhysicalMaterial({
     color: 0xffffff, metalness: 0, roughness: 0.05,
@@ -521,10 +532,9 @@ GLASS_DEFS.forEach((g) => {
   panel.rotation.set(0, g.rotY, g.rotZ);
   panel.userData = { baseY: g.y, baseRotY: g.rotY, baseRotZ: g.rotZ };
   // thin glowing rim so the panel edge reads clearly against the black background
-  const rim = new THREE.LineSegments(
-    new THREE.EdgesGeometry(panelGeo),
-    new THREE.LineBasicMaterial({ color: accentTint(1, 0.55), transparent: true, opacity: 0.6 })
-  );
+  const rimMat = new THREE.LineBasicMaterial({ color: accentTint(1, 0.55), transparent: true, opacity: 0.6 });
+  const rim = new THREE.LineSegments(new THREE.EdgesGeometry(panelGeo), rimMat);
+  glassRimMats.push(rimMat);
   panel.add(rim);
   glassGroup.add(panel);
 });
@@ -861,9 +871,27 @@ let activeMode = 'story';
 let shapeTween = null;
 let pulseTween = null;
 
+// re-tint highlights/glow to a new random accent — called on every filter
+// switch so effects read as visually distinct instead of "all the same"
+function applyAccent() {
+  accentColor = pickNextAccent();
+  buildEnvironment();
+  const rim = accentTint(1, 0.4);
+  gsap.to(rimLight.color, { r: rim.r, g: rim.g, b: rim.b, duration: 1.1, ease: 'power2.out' });
+  barMats.forEach((m) => {
+    const c = accentTint(1, 0.7);
+    gsap.to(m.color, { r: c.r, g: c.g, b: c.b, duration: 1.1, ease: 'power2.out' });
+  });
+  glassRimMats.forEach((m) => {
+    const c = accentTint(1, 0.55);
+    gsap.to(m.color, { r: c.r, g: c.g, b: c.b, duration: 1.1, ease: 'power2.out' });
+  });
+}
+
 function setMode(mode) {
   if (!FX[mode]) mode = 'story';
   activeMode = mode;
+  applyAccent();
 
   // UI state
   document.querySelectorAll('.selector-list li').forEach((li) =>
@@ -914,9 +942,14 @@ function setMode(mode) {
       break;
     case 'shape':
       gsap.to(demo, { autoMorphOn: 1, duration: D, ease: E });
-      shapeTween = gsap.to(demo, {
-        autoMorph: 1, duration: 3.2, ease: 'sine.inOut', yoyo: true, repeat: -1,
-      });
+      // a clear, readable sphere -> cube -> sphere cycle: real holds at both
+      // ends so each shape is actually seen, not a blur of rapid oscillation
+      demo.autoMorph = 0;
+      shapeTween = gsap.timeline({ repeat: -1 })
+        .to(demo, { autoMorph: 0, duration: 1.2 })
+        .to(demo, { autoMorph: 1, duration: 2.6, ease: 'power2.inOut' })
+        .to(demo, { autoMorph: 1, duration: 1.6 })
+        .to(demo, { autoMorph: 0, duration: 2.6, ease: 'power2.inOut' });
       break;
     case 'interactive':
       gsap.to(demo, { mouseRot: 3.2, mouseStr: 1.6, parallaxMul: 1.5, duration: D, ease: E });
