@@ -11,6 +11,7 @@ import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js';
 import { SMAAPass } from 'three/examples/jsm/postprocessing/SMAAPass.js';
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
+import { MeshSurfaceSampler } from 'three/examples/jsm/math/MeshSurfaceSampler.js';
 import gsap from 'gsap';
 import { ScrollTrigger } from 'gsap/ScrollTrigger';
 import Lenis from 'lenis';
@@ -541,6 +542,70 @@ GLASS_DEFS.forEach((g) => {
 scene.add(glassGroup);
 
 /* ============================================================
+   PARTICLE MORPH — a swarm of chrome nodes sampled across a rough
+   humanoid silhouette; no external 3D model, just primitives + sampling
+   ============================================================ */
+const humanGroup = new THREE.Group();
+humanGroup.visible = false;
+humanGroup.position.set(3.05, -0.85, -0.6);
+humanGroup.scale.setScalar(0.85);
+
+const HUMAN_PARTICLES = isTouch ? 380 : 760;
+const humanBasePos = [];   // THREE.Vector3[] — sampled rest position per instance
+const humanNormal = [];    // THREE.Vector3[] — surface normal per instance, for outward jitter
+const humanPhase = new Float32Array(HUMAN_PARTICLES); // per-instance animation offset
+
+{
+  const rigParts = [
+    { geo: new THREE.SphereGeometry(0.3, 14, 10), pos: [0, 1.85, 0], weight: 0.9 },        // head
+    { geo: new THREE.CapsuleGeometry(0.28, 0.7, 6, 12), pos: [0, 1.0, 0], weight: 2.0 },   // torso
+    { geo: new THREE.CapsuleGeometry(0.09, 0.75, 4, 8), pos: [-0.46, 0.95, 0], rot: [0, 0, 0.55], weight: 0.7 },  // left arm
+    { geo: new THREE.CapsuleGeometry(0.09, 0.75, 4, 8), pos: [0.46, 0.95, 0], rot: [0, 0, -0.55], weight: 0.7 }, // right arm
+    { geo: new THREE.CapsuleGeometry(0.13, 1.05, 4, 8), pos: [-0.16, -0.35, 0], weight: 1.1 },  // left leg
+    { geo: new THREE.CapsuleGeometry(0.13, 1.05, 4, 8), pos: [0.16, -0.35, 0], weight: 1.1 },   // right leg
+  ];
+  const totalWeight = rigParts.reduce((s, p) => s + p.weight, 0);
+  const dummy = new THREE.Object3D();
+  const tmpPos = new THREE.Vector3();
+  const tmpNorm = new THREE.Vector3();
+  let filled = 0;
+  rigParts.forEach((part, i) => {
+    const mesh = new THREE.Mesh(part.geo);
+    mesh.position.set(...part.pos);
+    if (part.rot) mesh.rotation.set(...part.rot);
+    mesh.updateMatrixWorld(true);
+    const sampler = new MeshSurfaceSampler(mesh).build();
+    const count = i === rigParts.length - 1
+      ? HUMAN_PARTICLES - filled
+      : Math.round((part.weight / totalWeight) * HUMAN_PARTICLES);
+    for (let n = 0; n < count && filled < HUMAN_PARTICLES; n++, filled++) {
+      sampler.sample(tmpPos, tmpNorm);
+      tmpPos.applyMatrix4(mesh.matrixWorld);
+      tmpNorm.transformDirection(mesh.matrixWorld);
+      humanBasePos.push(tmpPos.clone());
+      humanNormal.push(tmpNorm.clone());
+      humanPhase[filled] = Math.random() * Math.PI * 2;
+    }
+  });
+
+  const nodeGeo = new THREE.IcosahedronGeometry(0.05, 0);
+  const nodeMat = new THREE.MeshStandardMaterial({
+    color: 0x4a4a50, metalness: 1.0, roughness: 0.16, envMapIntensity: 1.2,
+  });
+  const humanMesh = new THREE.InstancedMesh(nodeGeo, nodeMat, HUMAN_PARTICLES);
+  humanBasePos.forEach((p, i) => {
+    dummy.position.copy(p);
+    dummy.scale.setScalar(1);
+    dummy.updateMatrix();
+    humanMesh.setMatrixAt(i, dummy.matrix);
+  });
+  humanGroup.add(humanMesh);
+  humanGroup.userData.mesh = humanMesh;
+}
+scene.add(humanGroup);
+const humanDummy = new THREE.Object3D();
+
+/* ============================================================
    POSTPROCESSING — bloom, grade (CA/vignette/grain/blur), SMAA
    ============================================================ */
 const composer = new EffectComposer(renderer);
@@ -621,7 +686,7 @@ const demo = {
   scrollStrict: 0,
   scaleOsc: 0, zoom: 0, portal: 0, orbit: 0,
   parallaxMul: 1, barsBoost: 0,
-  sweepOn: 0, dispOn: 0, ballOn: 0, glassOn: 0,
+  sweepOn: 0, dispOn: 0, ballOn: 0, glassOn: 0, humanOn: 0,
   chromeScaleMul: 1,
 };
 
@@ -867,6 +932,13 @@ const FX = {
     benefit: 'Інтерфейс отримує легкість, глибину і сучасний "скляний" вигляд.',
     best: 'Картки інтерфейсу, панелі навігації, сучасні UI-шари.',
   },
+  particlehuman: {
+    name: 'PARTICLE MORPH',
+    line: 'Сотні дрібних хромових вузликів, розсіяних по грубому силуету людини, дихають і мерехтять незалежно один від одного — фігура складається з рою, а не суцільного тіла.',
+    trigger: 'Погляньте праворуч від основного об\'єкта — там з\'явиться людський силует, зібраний із сотень окремих часток, що ледь помітно пульсують.',
+    benefit: 'Форма читається як жива речовина, а не як цифрова модель — рій завжди виглядає органічно.',
+    best: 'AI/tech-бренди, презентації "цифрової людини", абстрактні аватари.',
+  },
 };
 
 let activeMode = 'story';
@@ -934,7 +1006,7 @@ function setMode(mode) {
     ampMul: 1, speedMul: 1, mouseStr: 1, mouseRot: 1,
     autoMorphOn: 0, scrollStrict: 0, scaleOsc: 0, zoom: 0,
     portal: 0, orbit: 0, parallaxMul: 1, barsBoost: 0,
-    sweepOn: 0, dispOn: 0, ballOn: 0, glassOn: 0, chromeScaleMul: 1,
+    sweepOn: 0, dispOn: 0, ballOn: 0, glassOn: 0, humanOn: 0, chromeScaleMul: 1,
     duration: D, ease: E, overwrite: 'auto',
   });
 
@@ -995,6 +1067,9 @@ function setMode(mode) {
       break;
     case 'glass':
       gsap.to(demo, { glassOn: 1, chromeScaleMul: 0.68, duration: 1.6, ease: E });
+      break;
+    case 'particlehuman':
+      gsap.to(demo, { humanOn: 1, duration: 1.6, ease: E });
       break;
     case 'story':
       // read as the calm baseline every other effect exaggerates from —
@@ -1220,6 +1295,20 @@ function tick(time) {
       panel.rotation.y = u.baseRotY + Math.cos(t * 0.2 + i * 1.7) * 0.06;
       panel.rotation.z = u.baseRotZ + Math.sin(t * 0.25 + i * 1.7) * 0.05;
     });
+  }
+
+  // ---- particle morph: breathing swarm forming a rough human silhouette ----
+  humanGroup.visible = demo.humanOn > 0.02;
+  if (humanGroup.visible) {
+    const mesh = humanGroup.userData.mesh;
+    for (let i = 0; i < HUMAN_PARTICLES; i++) {
+      const breathe = 1 + Math.sin(t * 1.4 + humanPhase[i]) * 0.22 * demo.humanOn;
+      humanDummy.position.copy(humanBasePos[i]).addScaledVector(humanNormal[i], (breathe - 1) * 0.09);
+      humanDummy.scale.setScalar(breathe);
+      humanDummy.updateMatrix();
+      mesh.setMatrixAt(i, humanDummy.matrix);
+    }
+    mesh.instanceMatrix.needsUpdate = true;
   }
 
   // ---- camera: parallax, orbit, infinite zoom ----
