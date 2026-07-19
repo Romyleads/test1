@@ -667,7 +667,9 @@ gsap.ticker.lagSmoothing(0);
    SCROLL STORY — object travels + morphs across acts
    ============================================================ */
 function buildScrollStory() {
-  const scrub = 0.7;
+  // 3x smoother catch-up: a short/fast scroll gesture no longer snaps the
+  // object through several morph/rotation states at once — it settles gradually
+  const scrub = 2.1;
   const st = (trigger, vars) => gsap.timeline({
     scrollTrigger: { trigger, start: 'top bottom', end: 'top top', scrub },
   }).to(story, { ease: 'none', ...vars });
@@ -1110,9 +1112,11 @@ function tick(time) {
   // ---- inertial rotation ----
   const targX = mouse.sy * 0.32 * demo.mouseRot;
   const targY = mouse.sx * 0.5 * demo.mouseRot;
-  rot.vx += (targX - rot.x) * 0.012;
-  rot.vy += (targY - rot.y) * 0.012;
-  rot.vx *= 0.93; rot.vy *= 0.93;
+  // softer spring + longer velocity retention: a sudden mouse flick eases
+  // into motion and glides to a stop instead of snapping and jolting to a halt
+  rot.vx += (targX - rot.x) * 0.0055;
+  rot.vy += (targY - rot.y) * 0.0055;
+  rot.vx *= 0.97; rot.vy *= 0.97;
   rot.x += rot.vx; rot.y += rot.vy;
   chrome.rotation.x = rot.x + Math.sin(t * 0.21) * 0.08;
   chrome.rotation.y = rot.y + t * story.rotSpeed;
