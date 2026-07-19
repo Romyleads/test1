@@ -244,8 +244,8 @@ float surfDisp(vec3 dir, vec3 bp) {
   float d = 0.0;
   // flowing liquid noise (two octaves)
   float n1 = snoise(bp * uNScale + vec3(0.0, uTime * uNSpeed, 0.0));
-  float n2 = snoise(bp * uNScale * 2.6 + vec3(uTime * uNSpeed * 0.55, 0.0, 3.71));
-  d += (n1 * 0.8 + n2 * 0.24) * uAmp;
+  float n2 = snoise(bp * uNScale * 1.8 + vec3(uTime * uNSpeed * 0.4, 0.0, 3.71));
+  d += (n1 * 0.88 + n2 * 0.14) * uAmp;
 
   // cursor pressing into the metal
   float ma = acos(clamp(dot(dir, uMouseDir), -1.0, 1.0));
@@ -354,8 +354,8 @@ const chromeUniforms = {
   uTime:       { value: 0 },
   uMorph:      { value: 0 },
   uAmp:        { value: 0.055 },
-  uNScale:     { value: 1.35 },
-  uNSpeed:     { value: 0.32 },
+  uNScale:     { value: 1.0 },
+  uNSpeed:     { value: 0.14 },
   uBreathe:    { value: 1 },
   uTension:    { value: 0 },
   uMouseStr:   { value: 0 },
@@ -1094,9 +1094,9 @@ function tick(time) {
   // liquid params: extra wobble at mid-morph (tension between shapes)
   const midTension = 4 * morph * (1 - morph);
   // calm the liquid as the form resolves into the cube; boil at mid-morph
-  chromeUniforms.uAmp.value = 0.055 * demo.ampMul * (1 + midTension * 1.6) * (1 - morph * 0.62);
-  chromeUniforms.uNSpeed.value = 0.32 * demo.speedMul * (1 + midTension * 0.7);
-  chromeUniforms.uBreathe.value = 1 + Math.sin(t * 0.55) * 0.02;
+  chromeUniforms.uAmp.value = 0.06 * demo.ampMul * (1 + midTension * 1.3) * (1 - morph * 0.62);
+  chromeUniforms.uNSpeed.value = 0.14 * demo.speedMul * (1 + midTension * 0.4);
+  chromeUniforms.uBreathe.value = 1 + Math.sin(t * 0.32) * 0.02;
   chromeUniforms.uTension.value = story.tension;
   chromeUniforms.uPortal.value = demo.portal;
   chromeUniforms.uSweep.value = t * 0.16;
