@@ -211,6 +211,12 @@ uniform float uPortal;     // portal opening amount
 uniform vec3  uPortalAxis; // object-space axis toward camera
 uniform vec4  uRipples[${RIPPLE_COUNT}];   // xyz dir, w start time (-1 off)
 uniform vec4  uRippleMeta[${RIPPLE_COUNT}];// x type, y strength
+uniform float uSweep;      // wipe-transition phase, grows over time
+uniform float uSweepOn;    // wipe strength 0..1
+uniform float uDispMix;    // displacement-map crossfade 0..1
+uniform float uDispOn;     // displacement-map strength 0..1
+uniform vec3  uBallDir;    // object-space dir toward nearest metaball
+uniform float uBallStr;    // metaball attraction-bulge strength 0..1
 
 vec3 faceNormal(vec3 p) {
   vec3 a = abs(p);
@@ -267,6 +273,30 @@ float surfDisp(vec3 dir, vec3 bp) {
 
   // resolved-cube micro surface tension
   d += uTension * snoise(bp * 6.0 + vec3(0.0, uTime * 0.35, 0.0)) * 0.012;
+
+  // WebGL distortion transition: a travelling wipe-ridge sweeps the body
+  if (uSweepOn > 0.001) {
+    float coord = dot(dir, vec3(0.0, 1.0, 0.0)) * 0.5 + 0.5;
+    float delta = coord - fract(uSweep);
+    delta -= floor(delta + 0.5);
+    float ridge = exp(-delta * delta * 90.0);
+    d += uSweepOn * ridge * 0.09;
+    d += uSweepOn * sin(coord * 40.0 - uSweep * 40.0) * exp(-abs(delta) * 14.0) * 0.02;
+  }
+
+  // displacement-map morph: crossfade between two distinct noise "maps"
+  if (uDispOn > 0.001) {
+    float mapA = snoise(bp * 1.6 + vec3(0.0, uTime * 0.18, 0.0));
+    float mapB = (1.0 - abs(snoise(bp * 3.4 - vec3(0.0, uTime * 0.22, 0.0)))) * 2.0 - 1.0;
+    d += uDispOn * mix(mapA, mapB, uDispMix) * 0.075;
+  }
+
+  // metaball attraction: body swells toward the nearest orbiting ball
+  if (uBallStr > 0.001) {
+    float mb = acos(clamp(dot(dir, uBallDir), -1.0, 1.0));
+    d += uBallStr * 0.16 * exp(-mb * mb * 4.0);
+  }
+
   return d;
 }
 
@@ -319,6 +349,12 @@ const chromeUniforms = {
   uPortalAxis: { value: new THREE.Vector3(0, 0, 1) },
   uRipples:    { value: Array.from({ length: RIPPLE_COUNT }, () => new THREE.Vector4(0, 0, 1, -1)) },
   uRippleMeta: { value: Array.from({ length: RIPPLE_COUNT }, () => new THREE.Vector4(0, 1, 0, 0)) },
+  uSweep:      { value: 0 },
+  uSweepOn:    { value: 0 },
+  uDispMix:    { value: 0 },
+  uDispOn:     { value: 0 },
+  uBallDir:    { value: new THREE.Vector3(0, 1, 0) },
+  uBallStr:    { value: 0 },
 };
 
 const chromeMat = new THREE.MeshStandardMaterial({
@@ -425,6 +461,61 @@ const dust = new THREE.Points(dustGeo, dustMat);
 scene.add(dust);
 
 /* ============================================================
+   METABALL MORPHING — small chrome balls sharing the same geometry
+   and material as the hero object (same substance, same language)
+   ============================================================ */
+const metaballGroup = new THREE.Group();
+metaballGroup.visible = false;
+// lower-resolution geometry for the small balls — same material/shader (same
+// substance, same visual language) but far cheaper than the hero's 84-seg mesh
+const METABALL_SEG = isTouch ? 12 : 18;
+const metaballGeo = new THREE.BoxGeometry(2, 2, 2, METABALL_SEG, METABALL_SEG, METABALL_SEG);
+const METABALL_DEFS = [
+  { baseRadius: 1.9, speed: 0.55, phase: 0.0, size: 0.30 },
+  { baseRadius: 1.5, speed: -0.42, phase: 2.1, size: 0.24 },
+  { baseRadius: 2.3, speed: 0.34, phase: 4.4, size: 0.20 },
+];
+METABALL_DEFS.forEach((d) => {
+  const ball = new THREE.Mesh(metaballGeo, chromeMat);
+  ball.userData = { ...d };
+  metaballGroup.add(ball);
+});
+scene.add(metaballGroup);
+
+/* ============================================================
+   GLASSMORPHISM 3D — translucent layered panels around the object
+   ============================================================ */
+const glassGroup = new THREE.Group();
+glassGroup.visible = false;
+const GLASS_DEFS = [
+  { w: 1.7, h: 2.1, x: -1.7, y: 0.5, z: 1.3, rotY: 0.5, rotZ: -0.08, opacity: 0.85 },
+  { w: 1.5, h: 1.9, x: 1.8, y: -0.5, z: 0.5, rotY: -0.4, rotZ: 0.1, opacity: 0.78 },
+  { w: 1.3, h: 1.7, x: 0.1, y: 1.1, z: 2.2, rotY: 0.15, rotZ: 0.04, opacity: 0.7 },
+];
+GLASS_DEFS.forEach((g) => {
+  const mat = new THREE.MeshPhysicalMaterial({
+    color: 0xffffff, metalness: 0, roughness: 0.05,
+    transmission: 1, thickness: 0.6, ior: 1.4,
+    clearcoat: 1, clearcoatRoughness: 0.1,
+    envMapIntensity: 2.0, transparent: true, opacity: g.opacity,
+    side: THREE.DoubleSide,
+  });
+  const panelGeo = new THREE.PlaneGeometry(g.w, g.h);
+  const panel = new THREE.Mesh(panelGeo, mat);
+  panel.position.set(g.x, g.y, g.z);
+  panel.rotation.set(0, g.rotY, g.rotZ);
+  panel.userData = { baseY: g.y, baseRotY: g.rotY, baseRotZ: g.rotZ };
+  // thin glowing rim so the panel edge reads clearly against the black background
+  const rim = new THREE.LineSegments(
+    new THREE.EdgesGeometry(panelGeo),
+    new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.5 })
+  );
+  panel.add(rim);
+  glassGroup.add(panel);
+});
+scene.add(glassGroup);
+
+/* ============================================================
    POSTPROCESSING — bloom, grade (CA/vignette/grain/blur), SMAA
    ============================================================ */
 const composer = new EffectComposer(renderer);
@@ -505,6 +596,8 @@ const demo = {
   scrollStrict: 0,
   scaleOsc: 0, zoom: 0, portal: 0, orbit: 0,
   parallaxMul: 1, barsBoost: 0,
+  sweepOn: 0, dispOn: 0, ballOn: 0, glassOn: 0,
+  chromeScaleMul: 1,
 };
 
 const mouse = { x: 0, y: 0, sx: 0, sy: 0 };      // raw + smoothed NDC
@@ -710,10 +803,46 @@ const FX = {
     benefit: 'Інтерфейс отримує відчуття дотику — тактильність.',
     best: 'Інтерактивні hero-секції, ігрові бренд-моменти, тактильний UI.',
   },
+  webgl: {
+    name: 'WEBGL DISTORTION TRANSITION',
+    line: 'Хвиля-шов постійно біжить по поверхні знизу вгору й огортає тіло — це схоже на перехід між слайдами, тільки безперервний, а не одноразовий.',
+    trigger: 'Дивіться кілька секунд: світла "хвиля-шов" сама рухається по поверхні знизу вгору й зациклюється.',
+    benefit: 'Перехід відчувається органічним, а не різким CSS-фейдом чи нарізкою кадрів.',
+    best: 'Перемикання слайдів, зміна сторінок, кросфейд між станами контенту.',
+  },
+  dispmap: {
+    name: 'DISPLACEMENT MAP MORPH',
+    line: 'Характер самої текстури поверхні безперервно перетікає з м\'яких хвиль у різкіший "клітинний" візерунок і назад — форма тіла при цьому не змінюється.',
+    trigger: 'Дивіться на дрібний малюнок бліків на поверхні 8–10 секунд — візерунок сам поступово змінює "почерк" з плавного на різкіший і навпаки.',
+    benefit: 'Одна поверхня може мати кілька зовсім різних "почерків" без зміни геометрії.',
+    best: 'Портфоліо, галереї, творчі сайти з переходами між зображеннями.',
+  },
+  metaball: {
+    name: 'METABALL MORPHING',
+    line: 'Навколо основного тіла літають менші хромові кульки; коли вони наближаються — головне тіло випинається їм назустріч, наче краплі намагаються злитися.',
+    trigger: 'Стежте за дрібними кульками навколо об\'єкта — коли одна з них підлітає близько, поверхня головного тіла в цьому місці плавно "надувається" їй назустріч.',
+    benefit: 'Форми виглядають як живі краплі рідини, що притягуються й зливаються.',
+    best: 'Декоративні фони, інтерактивні заставки, живі бренд-елементи.',
+  },
+  blob: {
+    name: 'BLOB MORPHING',
+    line: 'М\'яка форма постійно "дихає" з пружинним ефектом — амплітуда деформації то різко зростає з перебігом (overshoot), то плавно заспокоюється, і так по колу.',
+    trigger: 'Дивіться 4–5 секунд: поверхня сама ритмічно "пружинить" — короткий різкий викид форми, потім м\'яке заспокоєння.',
+    benefit: 'Рух відчувається пружним і живим, а не механічним.',
+    best: 'Декоративний живий фон, м\'які фонові акценти інтерфейсу.',
+  },
+  glass: {
+    name: 'GLASSMORPHISM 3D',
+    line: 'Навколо зменшеного хромового тіла з\'являються кілька напівпрозорих скляних панелей у 3D-просторі — з заломленням, розмиттям і власними відбитками світла.',
+    trigger: 'Придивіться навколо основного об\'єкта — з\'являться кілька плаваючих напівпрозорих "скляних" панелей на різній глибині, що повільно гойдаються.',
+    benefit: 'Інтерфейс отримує легкість, глибину і сучасний "скляний" вигляд.',
+    best: 'Картки інтерфейсу, панелі навігації, сучасні UI-шари.',
+  },
 };
 
 let activeMode = 'story';
 let shapeTween = null;
+let pulseTween = null;
 
 function setMode(mode) {
   if (!FX[mode]) mode = 'story';
@@ -752,11 +881,13 @@ function setMode(mode) {
 
   // reset all exaggerations, then apply the selected one
   if (shapeTween) { shapeTween.kill(); shapeTween = null; }
+  if (pulseTween) { pulseTween.kill(); pulseTween = null; }
   const D = 1.4, E = 'power2.inOut';
   gsap.to(demo, {
     ampMul: 1, speedMul: 1, mouseStr: 1, mouseRot: 1,
     autoMorphOn: 0, scrollStrict: 0, scaleOsc: 0, zoom: 0,
     portal: 0, orbit: 0, parallaxMul: 1, barsBoost: 0,
+    sweepOn: 0, dispOn: 0, ballOn: 0, glassOn: 0, chromeScaleMul: 1,
     duration: D, ease: E, overwrite: 'auto',
   });
 
@@ -794,6 +925,24 @@ function setMode(mode) {
       break;
     case 'mousemorph':
       gsap.to(demo, { mouseStr: 3.6, mouseRot: 0.5, duration: D, ease: E });
+      break;
+    case 'webgl':
+      gsap.to(demo, { sweepOn: 1, duration: D, ease: E });
+      break;
+    case 'dispmap':
+      gsap.to(demo, { dispOn: 1, duration: D, ease: E });
+      break;
+    case 'metaball':
+      gsap.to(demo, { ballOn: 1, duration: D, ease: E });
+      break;
+    case 'blob':
+      gsap.to(demo, { mouseStr: 1.3, duration: D, ease: E });
+      pulseTween = gsap.to(demo, {
+        ampMul: 3.4, duration: 1.6, ease: 'elastic.out(1, 0.35)', yoyo: true, repeat: -1,
+      });
+      break;
+    case 'glass':
+      gsap.to(demo, { glassOn: 1, chromeScaleMul: 0.68, duration: 1.6, ease: E });
       break;
   }
 
@@ -931,6 +1080,10 @@ function tick(time) {
   chromeUniforms.uBreathe.value = 1 + Math.sin(t * 0.55) * 0.02;
   chromeUniforms.uTension.value = story.tension;
   chromeUniforms.uPortal.value = demo.portal;
+  chromeUniforms.uSweep.value = t * 0.16;
+  chromeUniforms.uSweepOn.value = demo.sweepOn;
+  chromeUniforms.uDispOn.value = demo.dispOn;
+  chromeUniforms.uDispMix.value = Math.sin(t * 0.35) * 0.5 + 0.5;
 
   // portal axis: object-space direction toward camera
   if (demo.portal > 0.001) {
@@ -954,8 +1107,50 @@ function tick(time) {
   chrome.position.x = story.x + mouse.sx * 0.14;
   chrome.position.y = story.y + Math.sin(t * 0.8) * 0.07 + mouse.sy * 0.1;
   chrome.position.z = scaleOscZ; // travels toward the lens in scale mode
-  const s = 1.35 * story.scale * introState.scale;
+  const s = 1.35 * story.scale * introState.scale * demo.chromeScaleMul;
   chrome.scale.setScalar(s);
+
+  // ---- metaball morphing: small chrome balls orbit and "attract" the body ----
+  metaballGroup.visible = demo.ballOn > 0.02;
+  if (metaballGroup.visible) {
+    let nearestDist = Infinity;
+    let nearestPos = null;
+    metaballGroup.children.forEach((ball) => {
+      const u = ball.userData;
+      const orbitT = t * u.speed + u.phase;
+      const shrink = 0.55 + 0.4 * Math.sin(t * 0.35 + u.phase);
+      const r = u.baseRadius * shrink;
+      ball.position.set(
+        chrome.position.x + Math.cos(orbitT) * r,
+        chrome.position.y + Math.sin(orbitT * 0.8) * r * 0.6,
+        chrome.position.z + Math.sin(orbitT) * r
+      );
+      ball.rotation.set(t * 0.25, t * 0.4, 0);
+      ball.scale.setScalar(s * u.size);
+      const dist = ball.position.distanceTo(chrome.position);
+      if (dist < nearestDist) { nearestDist = dist; nearestPos = ball.position; }
+    });
+    if (nearestPos) {
+      _v3a.copy(nearestPos).sub(chrome.position).normalize();
+      _qa.copy(chrome.quaternion).invert();
+      chromeUniforms.uBallDir.value.lerp(_v3a.applyQuaternion(_qa), 0.15).normalize();
+    }
+    const proximity = THREE.MathUtils.clamp(1 - (nearestDist - s * 0.9) / (s * 1.3), 0, 1);
+    chromeUniforms.uBallStr.value += (proximity * demo.ballOn - chromeUniforms.uBallStr.value) * 0.08;
+  } else {
+    chromeUniforms.uBallStr.value *= 0.9;
+  }
+
+  // ---- glassmorphism panels: subtle independent float around the body ----
+  glassGroup.visible = demo.glassOn > 0.02;
+  if (glassGroup.visible) {
+    glassGroup.children.forEach((panel, i) => {
+      const u = panel.userData;
+      panel.position.y = u.baseY + Math.sin(t * 0.4 + i * 1.7) * 0.12;
+      panel.rotation.y = u.baseRotY + Math.cos(t * 0.2 + i * 1.7) * 0.06;
+      panel.rotation.z = u.baseRotZ + Math.sin(t * 0.25 + i * 1.7) * 0.05;
+    });
+  }
 
   // ---- camera: parallax, orbit, infinite zoom ----
   let camX = mouse.sx * 0.38 * demo.parallaxMul;

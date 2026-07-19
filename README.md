@@ -1,6 +1,6 @@
 # LIQUID INTELLIGENCE — 3D Effect Laboratory
 
-A premium single-page presentation that demonstrates and compares ten advanced 3D web
+A premium single-page presentation that demonstrates and compares fifteen advanced 3D web
 effects using one liquid-chrome object in one continuous scroll experience.
 
 **Stack:** Three.js (WebGL, PBR, custom vertex-shader displacement) · GSAP + ScrollTrigger · Lenis smooth scroll · esbuild.
@@ -39,8 +39,16 @@ npx serve .
   with distinct signatures per item (wave, inward portal suction, expanding pulse,
   directional shift, micro-ripples).
 - **Act 6 — Effect selector.** A glass dropdown (SELECT EFFECT) plus in-page chips.
-  Each of the ten effects exaggerates one behaviour on the same chrome object and
-  updates a floating glass explanation panel (what's cool / strongest benefit / best for).
+  Each of the fifteen effects exaggerates one behaviour on the same chrome object and
+  updates a floating glass explanation panel in Ukrainian (what it does / how to actually
+  see it / strongest benefit / best for). The last five effects add supporting geometry
+  that shares the hero's material and shader for visual consistency: three small
+  chrome balls that orbit and locally bulge the body toward them (Metaball Morphing),
+  and translucent `MeshPhysicalMaterial` panels with transmission/refraction floating
+  around a shrunk hero object (Glassmorphism 3D). WebGL Distortion Transition and
+  Displacement Map Morph are pure vertex-shader additions (a travelling wipe-ridge and a
+  crossfade between two noise "maps"); Blob Morphing reuses the amplitude channel driven
+  by an elastic-easing GSAP tween instead of a linear one.
 - **Act 7 — Closing.**
 
 ## Postprocessing
