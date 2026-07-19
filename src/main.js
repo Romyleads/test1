@@ -1073,6 +1073,8 @@ const hudMorph = document.getElementById('hudMorph');
 const camTarget = new THREE.Vector3();
 let smoothVel = 0;
 let hudFrame = 0;
+let autoSpinY = 0;   // integrated separately from elapsed time so changing
+                     // rotSpeed never snaps the object to a new absolute angle
 
 function tick(time) {
   const dt = Math.min(clock.getDelta(), 0.05);
@@ -1119,7 +1121,12 @@ function tick(time) {
   rot.vx *= 0.97; rot.vy *= 0.97;
   rot.x += rot.vx; rot.y += rot.vy;
   chrome.rotation.x = rot.x + Math.sin(t * 0.21) * 0.08;
-  chrome.rotation.y = rot.y + t * story.rotSpeed;
+  // integrate the idle spin instead of recomputing it as (elapsed time * speed):
+  // that pattern jumps the absolute angle any time speed changes, which read
+  // as the object "flinching" mid-scroll. Accumulating means only the *rate*
+  // changes — the current angle is always continuous.
+  autoSpinY += dt * story.rotSpeed;
+  chrome.rotation.y = rot.y + autoSpinY;
 
   // ---- object placement ----
   const scaleOscZ = Math.sin(t * 0.62) * 2.6 * demo.scaleOsc;
