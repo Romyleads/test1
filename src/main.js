@@ -551,7 +551,7 @@ const humanGroup = new THREE.Group();
 humanGroup.visible = false;
 humanGroup.position.set(-1.45, -1.35, 0);
 
-const humanUniforms = { uTime: chromeUniforms.uTime, uAmp: { value: 0.05 } };
+const humanUniforms = { uTime: chromeUniforms.uTime, uAmp: { value: 0.014 } };
 const humanMat = new THREE.MeshStandardMaterial({
   color: 0x4a4a50, metalness: 1.0, roughness: 0.14, envMapIntensity: 1.25,
 });
@@ -562,8 +562,11 @@ humanMat.onBeforeCompile = (shader) => {
     '#include <begin_vertex>',
     `
     vec3 transformed = vec3(position);
-    float n = snoise(position * 2.4 + vec3(0.0, uTime * 0.15, 0.0));
-    transformed += normalize(normal) * n * uAmp;
+    // high frequency so it reads as a fine liquid shimmer across the skin,
+    // not a slow swell of whole limbs (which looked like body horror)
+    float n = snoise(position * 11.0 + vec3(0.0, uTime * 0.12, 0.0));
+    float n2 = snoise(position * 22.0 - vec3(0.0, uTime * 0.09, 3.1));
+    transformed += normalize(normal) * (n * 0.7 + n2 * 0.3) * uAmp;
     `
   );
 };
@@ -1288,7 +1291,7 @@ function tick(time) {
   // ---- particle morph: one continuous liquid-chrome body, centre stage ----
   humanGroup.visible = demo.humanOn > 0.02;
   if (humanGroup.visible) {
-    humanUniforms.uAmp.value = 0.05 * demo.humanOn;
+    humanUniforms.uAmp.value = 0.014 * demo.humanOn;
     humanGroup.rotation.y = Math.sin(t * 0.18) * 0.35;
   }
 
