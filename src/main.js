@@ -994,13 +994,22 @@ function setMode(mode) {
     case 'glass':
       gsap.to(demo, { glassOn: 1, chromeScaleMul: 0.68, duration: 1.6, ease: E });
       break;
+    case 'story':
+      // read as the calm baseline every other effect exaggerates from —
+      // otherwise the always-on liquid wobble makes it look identical to them
+      gsap.to(demo, { ampMul: 0.55, speedMul: 0.65, duration: D, ease: E });
+      break;
   }
 
-  // bring the stage into view for a focused demonstration
+  // bring the stage into view: the demo modes scroll to the laboratory,
+  // Scroll Story scrolls to the hero so its scroll-driven behaviour is
+  // actually visible instead of sitting static wherever you switched it on
   if (mode !== 'story') {
     const act6 = document.getElementById('act6');
     const target = act6.offsetTop + act6.offsetHeight * 0.35 - window.innerHeight * 0.5;
     lenis.scrollTo(target, { duration: 1.6 });
+  } else {
+    lenis.scrollTo(0, { duration: 1.6 });
   }
 }
 
