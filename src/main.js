@@ -696,10 +696,12 @@ function buildScrollStory() {
   }).to(story, { ease: 'none', morph: 1, x: -1.35, tension: 1, rotSpeed: 0.22 });
   // cube -> marquee: settle behind the type
   st('#act5', { x: 0, y: 0.1, scale: 0.85 });
-  // marquee -> demo lab: return to pure sphere as the neutral canvas
+  // marquee -> demo lab: stay resolved as a cube — flat faces make every
+  // effect's surface behaviour (noise, ripples, dents) far easier to read
+  // than on a sphere, and it stops re-morphing back and forth on plain scroll
   gsap.timeline({
     scrollTrigger: { trigger: '#act6', start: 'top bottom', end: 'top top', scrub },
-  }).to(story, { ease: 'none', morph: 0, tension: 0, x: -1.45, y: 0, scale: 1.05, rotSpeed: 0.12 });
+  }).to(story, { ease: 'none', morph: 1, tension: 1, x: -1.45, y: 0, scale: 1.05, rotSpeed: 0.12 });
   // demo -> closing: recede into the dark
   st('#act7', { x: 0, y: 0.25, scale: 0.5, rotSpeed: 0.06 });
 
