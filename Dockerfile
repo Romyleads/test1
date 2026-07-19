@@ -8,4 +8,5 @@ RUN npm run build
 FROM nginx:alpine
 COPY --from=build /app/index.html /app/styles.css /usr/share/nginx/html/
 COPY --from=build /app/dist /usr/share/nginx/html/dist
+COPY --from=build /app/models /usr/share/nginx/html/models
 EXPOSE 80
