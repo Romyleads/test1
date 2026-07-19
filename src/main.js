@@ -73,7 +73,7 @@ const DPR = Math.min(window.devicePixelRatio || 1, 1.75);
 renderer.setPixelRatio(DPR);
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure = 0.95;
+renderer.toneMappingExposure = 1.05;
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x050506);
@@ -82,6 +82,20 @@ scene.fog = new THREE.FogExp2(0x050506, 0.045);
 const camera = new THREE.PerspectiveCamera(38, window.innerWidth / window.innerHeight, 0.1, 60);
 const CAM_DIST = 7.2;
 camera.position.set(0, 0, CAM_DIST);
+
+/* ============================================================
+   ACCENT — one color chosen at random per load; tints highlights/glow
+   only, while the metal itself stays dark monochrome graphite/silver
+   ============================================================ */
+const ACCENT_PALETTE = [
+  new THREE.Color(0xb400ff), // ядовито-фіолетовий
+  new THREE.Color(0x00e5ff), // електрик-ціан
+  new THREE.Color(0xffb84d), // рідке золото
+];
+const accentColor = ACCENT_PALETTE[Math.floor(Math.random() * ACCENT_PALETTE.length)];
+function accentTint(intensity, mix = 0.6) {
+  return new THREE.Color(1, 1, 1).lerp(accentColor, mix).multiplyScalar(intensity);
+}
 
 /* ============================================================
    ENVIRONMENT — procedural studio / laboratory HDRI
@@ -94,10 +108,10 @@ const envScene = new THREE.Scene();
 {
   const room = new THREE.Mesh(
     new THREE.BoxGeometry(24, 24, 24),
-    new THREE.MeshBasicMaterial({ color: 0x404048, side: THREE.BackSide })
+    new THREE.MeshBasicMaterial({ color: 0x232326, side: THREE.BackSide })
   );
   envScene.add(room);
-  // broad soft gradient panels for the liquid-mercury mid-tones
+  // broad soft gradient panels for the liquid-mercury mid-tones — neutral graphite
   const soft = (w, h, x, y, z, rx, ry, i) => {
     const m = new THREE.Mesh(
       new THREE.PlaneGeometry(w, h),
@@ -107,14 +121,15 @@ const envScene = new THREE.Scene();
     m.rotation.set(rx, ry, 0);
     envScene.add(m);
   };
-  soft(16, 10, 0, 4, -11, 0.25, 0, 0.9);   // rear soft wall
-  soft(12, 12, 0, -11, 2, Math.PI / 2, 0, 0.55); // floor bounce
+  soft(16, 10, 0, 4, -11, 0.25, 0, 0.7);   // rear soft wall
+  soft(12, 12, 0, -11, 2, Math.PI / 2, 0, 0.4); // floor bounce
 
-  const strip = (w, h, x, y, z, rx, ry, intensity) => {
+  // engineered strips carry the accent color — this is where the "glow" lives
+  const strip = (w, h, x, y, z, rx, ry, intensity, mix = 0.6) => {
     const m = new THREE.Mesh(
       new THREE.PlaneGeometry(w, h),
       new THREE.MeshBasicMaterial({
-        color: new THREE.Color(intensity, intensity, intensity * 1.05),
+        color: accentTint(intensity, mix),
         side: THREE.DoubleSide,
       })
     );
@@ -135,11 +150,11 @@ const envRT = pmrem.fromScene(envScene, 0.04);
 scene.environment = envRT.texture;
 pmrem.dispose();
 
-/* key/rim lights for extra speculars */
-const keyLight = new THREE.DirectionalLight(0xffffff, 0.7);
+/* key/rim lights for extra speculars — rim carries a touch of the accent */
+const keyLight = new THREE.DirectionalLight(0xffffff, 0.6);
 keyLight.position.set(4, 6, 5);
 scene.add(keyLight);
-const rimLight = new THREE.DirectionalLight(0xdfe6ff, 0.45);
+const rimLight = new THREE.DirectionalLight(accentTint(1, 0.4), 0.5);
 rimLight.position.set(-6, -2, -4);
 scene.add(rimLight);
 
@@ -358,10 +373,10 @@ const chromeUniforms = {
 };
 
 const chromeMat = new THREE.MeshStandardMaterial({
-  color: 0xffffff,
+  color: 0x4a4a50, // dark graphite/silver base — reflections carry the accent, not the base
   metalness: 1.0,
-  roughness: 0.12,
-  envMapIntensity: 1.1,
+  roughness: 0.09,
+  envMapIntensity: 1.35,
 });
 chromeMat.onBeforeCompile = (shader) => {
   Object.assign(shader.uniforms, chromeUniforms);
@@ -414,7 +429,7 @@ const BAR_DEFS = [
 ];
 BAR_DEFS.forEach((b) => {
   const mat = new THREE.MeshBasicMaterial({
-    map: stripTex, transparent: true, opacity: b.o,
+    map: stripTex, color: accentTint(1, 0.7), transparent: true, opacity: b.o,
     blending: THREE.AdditiveBlending, depthWrite: false,
   });
   const bar = new THREE.Mesh(new THREE.PlaneGeometry(b.w, 0.028), mat);
@@ -508,7 +523,7 @@ GLASS_DEFS.forEach((g) => {
   // thin glowing rim so the panel edge reads clearly against the black background
   const rim = new THREE.LineSegments(
     new THREE.EdgesGeometry(panelGeo),
-    new THREE.LineBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.5 })
+    new THREE.LineBasicMaterial({ color: accentTint(1, 0.55), transparent: true, opacity: 0.6 })
   );
   panel.add(rim);
   glassGroup.add(panel);
@@ -524,7 +539,7 @@ composer.setSize(window.innerWidth, window.innerHeight);
 composer.addPass(new RenderPass(scene, camera));
 
 const bloom = new UnrealBloomPass(
-  new THREE.Vector2(window.innerWidth, window.innerHeight), 0.2, 0.7, 0.92
+  new THREE.Vector2(window.innerWidth, window.innerHeight), 0.34, 0.75, 0.86
 );
 composer.addPass(bloom);
 composer.addPass(new OutputPass());
@@ -532,7 +547,7 @@ composer.addPass(new OutputPass());
 const GradeShader = {
   uniforms: {
     tDiffuse: { value: null },
-    uCA: { value: 0.0016 },
+    uCA: { value: 0.0026 },
     uVel: { value: 0 },
     uTime: { value: 0 },
   },
@@ -568,7 +583,7 @@ const GradeShader = {
       // cinematic vignette
       col *= 1.0 - r2 * 0.55;
       // fine grain
-      col += (hash(vUv * 1013.0 + fract(uTime) * 91.0) - 0.5) * 0.028;
+      col += (hash(vUv * 1013.0 + fract(uTime) * 91.0) - 0.5) * 0.035;
       gl_FragColor = vec4(col, 1.0);
     }`,
 };
