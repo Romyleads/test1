@@ -11,7 +11,6 @@ import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js';
 import { SMAAPass } from 'three/examples/jsm/postprocessing/SMAAPass.js';
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment.js';
-import { MeshSurfaceSampler } from 'three/examples/jsm/math/MeshSurfaceSampler.js';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import gsap from 'gsap';
 import { ScrollTrigger } from 'gsap/ScrollTrigger';
@@ -543,21 +542,32 @@ GLASS_DEFS.forEach((g) => {
 scene.add(glassGroup);
 
 /* ============================================================
-   PARTICLE MORPH — a swarm of chrome nodes sampled across the surface
-   of a real human mesh (three.js's official "Michelle" example model,
-   MIT-licensed) — a hand-built primitive rig read as an abstract blob,
-   not a person, so the silhouette needs real human geometry to sample.
+   PARTICLE MORPH — a single continuous liquid-chrome surface (same
+   material family as the hero, not a scattered swarm) shaped like a
+   real person (three.js's official "Michelle" example model, MIT-
+   licensed), standing centre-stage in place of the cube while active.
    ============================================================ */
 const humanGroup = new THREE.Group();
 humanGroup.visible = false;
-humanGroup.position.set(2.55, -1.55, -0.6);
+humanGroup.position.set(-1.45, -1.35, 0);
 
-const HUMAN_PARTICLES = isTouch ? 500 : 1000;
-const humanBasePos = [];   // THREE.Vector3[] — sampled rest position per instance
-const humanNormal = [];    // THREE.Vector3[] — surface normal per instance, for outward jitter
-const humanPhase = new Float32Array(HUMAN_PARTICLES); // per-instance animation offset
-const humanDummy = new THREE.Object3D();
-let humanMesh = null; // populated once the model finishes loading
+const humanUniforms = { uTime: chromeUniforms.uTime, uAmp: { value: 0.05 } };
+const humanMat = new THREE.MeshStandardMaterial({
+  color: 0x4a4a50, metalness: 1.0, roughness: 0.14, envMapIntensity: 1.25,
+});
+humanMat.onBeforeCompile = (shader) => {
+  Object.assign(shader.uniforms, humanUniforms);
+  shader.vertexShader = 'uniform float uTime;\nuniform float uAmp;\n' + GLSL_NOISE + shader.vertexShader;
+  shader.vertexShader = shader.vertexShader.replace(
+    '#include <begin_vertex>',
+    `
+    vec3 transformed = vec3(position);
+    float n = snoise(position * 2.4 + vec3(0.0, uTime * 0.15, 0.0));
+    transformed += normalize(normal) * n * uAmp;
+    `
+  );
+};
+humanMat.customProgramCacheKey = () => 'liquid-human';
 
 new GLTFLoader().load('./models/human.glb', (gltf) => {
   let sourceMesh = null;
@@ -567,44 +577,19 @@ new GLTFLoader().load('./models/human.glb', (gltf) => {
   if (!sourceMesh) return;
 
   // normalize to a consistent on-stage height regardless of the source
-  // model's native scale/units
+  // model's native scale/units, feet at y=0, centred on x
   sourceMesh.updateMatrixWorld(true);
   const box = new THREE.Box3().setFromObject(sourceMesh);
   const size = new THREE.Vector3();
   box.getSize(size);
-  const targetHeight = 2.5;
+  const targetHeight = 3.1;
   const scale = targetHeight / size.y;
   const centerX = (box.min.x + box.max.x) / 2;
-  const rig = new THREE.Group();
-  rig.add(sourceMesh);
-  rig.scale.setScalar(scale);
-  rig.position.set(-centerX * scale, -box.min.y * scale, 0);
-  rig.updateMatrixWorld(true);
 
-  const sampler = new MeshSurfaceSampler(sourceMesh).build();
-  const tmpPos = new THREE.Vector3();
-  const tmpNorm = new THREE.Vector3();
-  for (let i = 0; i < HUMAN_PARTICLES; i++) {
-    sampler.sample(tmpPos, tmpNorm);
-    tmpPos.applyMatrix4(sourceMesh.matrixWorld).applyMatrix4(rig.matrixWorld);
-    tmpNorm.transformDirection(sourceMesh.matrixWorld).transformDirection(rig.matrixWorld);
-    humanBasePos.push(tmpPos.clone());
-    humanNormal.push(tmpNorm.clone());
-    humanPhase[i] = Math.random() * Math.PI * 2;
-  }
-
-  const nodeGeo = new THREE.IcosahedronGeometry(0.032, 0);
-  const nodeMat = new THREE.MeshStandardMaterial({
-    color: 0x4a4a50, metalness: 1.0, roughness: 0.16, envMapIntensity: 1.2,
-  });
-  humanMesh = new THREE.InstancedMesh(nodeGeo, nodeMat, HUMAN_PARTICLES);
-  humanBasePos.forEach((p, i) => {
-    humanDummy.position.copy(p);
-    humanDummy.scale.setScalar(1);
-    humanDummy.updateMatrix();
-    humanMesh.setMatrixAt(i, humanDummy.matrix);
-  });
-  humanGroup.add(humanMesh);
+  const bodyMesh = new THREE.Mesh(sourceMesh.geometry, humanMat);
+  bodyMesh.scale.setScalar(scale);
+  bodyMesh.position.set(-centerX * scale, -box.min.y * scale, 0);
+  humanGroup.add(bodyMesh);
 });
 scene.add(humanGroup);
 
@@ -937,10 +922,10 @@ const FX = {
   },
   particlehuman: {
     name: 'PARTICLE MORPH',
-    line: 'Сотні дрібних хромових вузликів, розсіяних по грубому силуету людини, дихають і мерехтять незалежно один від одного — фігура складається з рою, а не суцільного тіла.',
-    trigger: 'Погляньте праворуч від основного об\'єкта — там з\'явиться людський силует, зібраний із сотень окремих часток, що ледь помітно пульсують.',
-    benefit: 'Форма читається як жива речовина, а не як цифрова модель — рій завжди виглядає органічно.',
-    best: 'AI/tech-бренди, презентації "цифрової людини", абстрактні аватари.',
+    line: 'Той самий хромовий матеріал і той самий рідкий шум, що й на кубі, але тепер це суцільна поверхня у формі людини — куб на час ефекту ховається, а людина стає в центр сцени.',
+    trigger: 'Куб зникає, а на його місці в центрі плавно проявляється хромова людська фігура — суцільна, не з окремих часток, з тим самим легким "диханням" поверхні.',
+    benefit: 'Одна й та сама рідка хромова "речовина" може набувати абсолютно різних форм — від куба до людини — без зміни матеріалу чи мови дизайну.',
+    best: 'AI/tech-бренди, презентації "цифрової людини", брендові трансформації форми.',
   },
 };
 
@@ -1072,7 +1057,7 @@ function setMode(mode) {
       gsap.to(demo, { glassOn: 1, chromeScaleMul: 0.68, duration: 1.6, ease: E });
       break;
     case 'particlehuman':
-      gsap.to(demo, { humanOn: 1, duration: 1.6, ease: E });
+      gsap.to(demo, { humanOn: 1, chromeScaleMul: 0.02, duration: 1.6, ease: E });
       break;
     case 'story':
       // read as the calm baseline every other effect exaggerates from —
@@ -1300,17 +1285,11 @@ function tick(time) {
     });
   }
 
-  // ---- particle morph: breathing swarm sampled from a real human mesh ----
-  humanGroup.visible = demo.humanOn > 0.02 && humanMesh !== null;
+  // ---- particle morph: one continuous liquid-chrome body, centre stage ----
+  humanGroup.visible = demo.humanOn > 0.02;
   if (humanGroup.visible) {
-    for (let i = 0; i < HUMAN_PARTICLES; i++) {
-      const breathe = 1 + Math.sin(t * 1.4 + humanPhase[i]) * 0.22 * demo.humanOn;
-      humanDummy.position.copy(humanBasePos[i]).addScaledVector(humanNormal[i], (breathe - 1) * 0.09);
-      humanDummy.scale.setScalar(breathe);
-      humanDummy.updateMatrix();
-      humanMesh.setMatrixAt(i, humanDummy.matrix);
-    }
-    humanMesh.instanceMatrix.needsUpdate = true;
+    humanUniforms.uAmp.value = 0.05 * demo.humanOn;
+    humanGroup.rotation.y = Math.sin(t * 0.18) * 0.35;
   }
 
   // ---- camera: parallax, orbit, infinite zoom ----
